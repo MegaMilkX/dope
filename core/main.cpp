@@ -22,6 +22,25 @@ struct RenderModule
   }
 };
 
+struct AudioModule
+{
+  typedef void(*FuncInit_t)(void);
+  typedef void(*FuncUpdate_t)(void*, float);
+  typedef void(*FuncCleanup_t)(void);
+  
+  FuncInit_t Init;
+  FuncUpdate_t Update;
+  FuncCleanup_t Cleanup;
+  
+  void Load()
+  {
+    HMODULE module = LoadLibraryA("audio_module.dll");
+    Init = (FuncInit_t)GetProcAddress(module, "AudioInit");
+    Update = (FuncUpdate_t)GetProcAddress(module, "AudioUpdate");
+    Cleanup = (FuncCleanup_t)GetProcAddress(module, "AudioCleanup");
+  }
+};
+
 RenderModule renderModule;
 
 HWND hWnd = 0;
