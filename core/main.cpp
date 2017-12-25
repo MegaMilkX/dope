@@ -2,6 +2,7 @@
 #include <windows.h>
 #include "screen_buffer.h"
 #include <stdio.h>
+#include <math.h>
 
 struct RenderModule
 {
@@ -171,7 +172,15 @@ HWAVEOUT hWaveOut;
 LPSTR lpData;
 float clpData[65536];
 
-char buffer[44100 * 60];
+char buffer[44100];
+
+void CALLBACK waveOutProc(HWAVEOUT hwo, UINT msg, DWORD_PTR dwInst, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
+{
+  if(msg == WOM_DONE)
+  {
+    
+  }
+}
 
 int main()
 {
@@ -183,18 +192,20 @@ int main()
   
   HWAVEOUT hWaveOut = 0;
 	WAVEFORMATEX wfx = { WAVE_FORMAT_PCM, 1, 44100, 44100, 1, 8, 0 };
-	waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
+	waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL | WAVE_FORMAT_DIRECT);
 	
 	// See http://goo.gl/hQdTi
 	for (DWORD t = 0; t < sizeof(buffer); ++t)
-		buffer[t] = static_cast<char>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
-	
+  {
+    float cur = t/(float)sizeof(buffer);
+    buffer[t] = tanf(cur * 2300) * sinf(cur * 2000) * cosf(cur * 1000) * cosf(cur * 500) * 255;
+		//buffer[t] = static_cast<char>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
+  }
+  
   WAVEHDR header = { buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
   
   waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
 	waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
-	waveOutUnprepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
-  waveOutClose(hWaveOut);
   
   while(msg.message != WM_QUIT)
   {
@@ -204,6 +215,13 @@ int main()
       DispatchMessage(&msg);
       if(msg.message == WM_QUIT)
         break;
+    }
+    
+    if(header.dwFlags & WHDR_DONE)
+    {
+      header = { buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
+      waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
+      waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
     }
     
     renderModule.Update(&screen);
@@ -224,6 +242,9 @@ int main()
       SRCCOPY
     );
   }
+  
+  waveOutUnprepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
+  waveOutClose(hWaveOut);
   
   renderModule.Cleanup();
   
