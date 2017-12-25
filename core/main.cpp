@@ -198,7 +198,7 @@ int main()
 	for (DWORD t = 0; t < sizeof(buffer); ++t)
   {
     float cur = t/(float)sizeof(buffer);
-    buffer[t] = tanf(cur * 2300) * sinf(cur * 2000) * cosf(cur * 1000) * cosf(cur * 500) * 255;
+    buffer[t] = tanf(cur * (2300 * (1.0f - cur))) * sinf(cur * (2000 * cur)) * cosf(cur * 1000) * cosf(cur * 500) * cur * 255;
 		//buffer[t] = static_cast<char>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
   }
   
