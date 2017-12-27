@@ -26,7 +26,7 @@ struct RenderModule
 struct AudioModule
 {
   typedef void(*FuncInit_t)(void);
-  typedef void(*FuncUpdate_t)(void*, float);
+  typedef void(*FuncUpdate_t)(void*, int, float);
   typedef void(*FuncCleanup_t)(void);
   
   FuncInit_t Init;
@@ -43,6 +43,7 @@ struct AudioModule
 };
 
 RenderModule renderModule;
+AudioModule audioModule;
 
 HWND hWnd = 0;
 HDC hdc;
@@ -172,7 +173,7 @@ HWAVEOUT hWaveOut;
 LPSTR lpData;
 float clpData[65536];
 
-char buffer[44100];
+short buffer[44100];
 
 void CALLBACK waveOutProc(HWAVEOUT hwo, UINT msg, DWORD_PTR dwInst, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
@@ -189,20 +190,16 @@ int main()
   
   renderModule.Load();
   renderModule.Init();
+  audioModule.Load();
+  audioModule.Init();
   
-  HWAVEOUT hWaveOut = 0;
-	WAVEFORMATEX wfx = { WAVE_FORMAT_PCM, 1, 44100, 44100, 1, 8, 0 };
-	waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL | WAVE_FORMAT_DIRECT);
-	
+	WAVEFORMATEX wfx = { WAVE_FORMAT_PCM, 2, 44100, 44100, 4, 16, 0 };
+	waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
+	waveOutSetVolume(hWaveOut, (DWORD)0x80008000UL);
 	// See http://goo.gl/hQdTi
-	for (DWORD t = 0; t < sizeof(buffer); ++t)
-  {
-    float cur = t/(float)sizeof(buffer);
-    buffer[t] = tanf(cur * (2300 * (1.0f - cur))) * sinf(cur * (2000 * cur)) * cosf(cur * 1000) * cosf(cur * 500) * cur * 255;
-		//buffer[t] = static_cast<char>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
-  }
+	audioModule.Update((void*)buffer, 44100, 0);
   
-  WAVEHDR header = { buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
+  WAVEHDR header = { (char*)buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
   
   waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
 	waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
@@ -219,7 +216,9 @@ int main()
     
     if(header.dwFlags & WHDR_DONE)
     {
-      header = { buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
+      audioModule.Update((void*)buffer, 44100, 0);
+      
+      header = { (char*)buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
       waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
       waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
     }
@@ -246,6 +245,7 @@ int main()
   waveOutUnprepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
   waveOutClose(hWaveOut);
   
+  audioModule.Cleanup();
   renderModule.Cleanup();
   
   return 0;
