@@ -1,7 +1,7 @@
 @echo off
 
 REM What's your project name?
-set EXENAME=audio
+set EXENAME=game
 
 set INCLUDE_PATHS=/I "%~dp0\..\Aurora\include" ^
 /I "%~dp0\..\lib\lua\include" ^
