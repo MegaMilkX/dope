@@ -6,7 +6,7 @@
 extern "C"{
  
 DLLEXPORT void AudioInit();
-DLLEXPORT void AudioUpdate(void*, int, float);
+DLLEXPORT void AudioUpdate(void*, int, int);
 DLLEXPORT void AudioCleanup(); 
   
 }

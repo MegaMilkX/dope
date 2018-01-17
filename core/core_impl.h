@@ -1,8 +1,64 @@
 #ifndef CORE_IMPL_H
 #define CORE_IMPL_H
 
+#include <iostream>
+#include <string>
+
 #include "core_interface.h"
 #include "scene_object_impl.h"
+
+#include <windows.h>
+#include <stdint.h>
+
+#include <mmdeviceapi.h>
+#include <Audioclient.h>
+typedef LONGLONG REFERENCE_TIME;
+
+std::string GetLastErrorAsString()
+{
+    //Get the error message, if any.
+    DWORD errorMessageID = ::GetLastError();
+    if(errorMessageID == 0)
+        return std::string(); //No error message has been recorded
+
+    LPSTR messageBuffer = nullptr;
+    size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                 NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL);
+
+    std::string message(messageBuffer, size);
+
+    //Free the buffer.
+    LocalFree(messageBuffer);
+
+    return message;
+}
+  
+class Timer
+{
+public:
+    Timer()
+    {
+        QueryPerformanceFrequency(&freq);
+    }
+
+    void Start()
+    {
+        QueryPerformanceCounter(&start);
+    }
+    
+    int64_t End()
+    {
+        QueryPerformanceCounter(&end);
+        elapsed.QuadPart = end.QuadPart - start.QuadPart;
+        elapsed.QuadPart *= 1000000;
+        elapsed.QuadPart /= freq.QuadPart;
+        return elapsed.QuadPart;
+    }
+private:
+    LARGE_INTEGER freq;
+    LARGE_INTEGER start, end;
+    LARGE_INTEGER elapsed;
+};
 
 inline LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -54,7 +110,7 @@ struct RenderModule
 struct AudioModule
 {
   typedef void(*FuncInit_t)(void);
-  typedef void(*FuncUpdate_t)(void*, int, float);
+  typedef void(*FuncUpdate_t)(void*, int, int);
   typedef void(*FuncCleanup_t)(void);
   typedef Component*(*FuncCreateComponent_t)(SceneObject*, const char*);
   
@@ -97,6 +153,9 @@ struct GameModule
 class Core : public CoreInterface
 {
 public:
+    Core()
+    : dt(0.0f) {}
+    
     bool Init()
     {
         InitWindow();
@@ -110,15 +169,126 @@ public:
         gameModule.Init(this);
         
         WAVEFORMATEX wfx = { WAVE_FORMAT_PCM, 2, 44100, 44100, 4, 16, 0 };
+        
+        /*
         waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
         waveOutSetVolume(hWaveOut, (DWORD)0x80008000UL);
         // See http://goo.gl/hQdTi
-        audioModule.Update((void*)buffer, 44100, 0);
+        
         
         header = { (char*)buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
         
         waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
         waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
+        */
+        HRESULT hr;
+        REFERENCE_TIME hnsRequestedDuration = 0;
+        IMMDeviceEnumerator *pEnumerator = NULL;
+        IMMDevice *pDevice = NULL;
+        IAudioClient *pAudioClient = NULL;
+        IAudioRenderClient *pRenderClient = NULL;
+        HANDLE hEvent = NULL;
+        HANDLE hTask = NULL;
+        UINT32 bufferFrameCount;
+        BYTE *pData;
+        DWORD flags = 0;
+        const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
+        const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
+        const IID IID_IAudioClient = __uuidof(IAudioClient);
+        const IID IID_IAudioRenderClient = __uuidof(IAudioRenderClient);
+        hr = CoCreateInstance(
+            CLSID_MMDeviceEnumerator,
+            0,
+            CLSCTX_ALL,
+            IID_IMMDeviceEnumerator,
+            (void**)&pEnumerator
+        );
+        if(FAILED(hr))
+        {
+            std::cout << "CoCreateInstance failed" << std::endl;
+        }
+        
+        hr = pEnumerator->GetDefaultAudioEndpoint(
+            eRender,
+            eConsole,
+            &pDevice
+        );
+        if(FAILED(hr))
+        {
+            std::cout << "GetDefaultAudioEndpoint failed" << std::endl;
+        }
+        
+        hr = pDevice->Activate(
+            IID_IAudioClient,
+            CLSCTX_ALL,
+            NULL,
+            (void**)&pAudioClient
+        );
+        if(FAILED(hr))
+        {
+            std::cout << "Activate failed" << std::endl;
+        }
+        
+        hr = pAudioClient->GetDevicePeriod(NULL, &hnsRequestedDuration);
+        if(FAILED(hr))
+        {
+            std::cout << "GetDevicePeriod failed" << std::endl;
+        }
+        std::cout << "GetDevicePeriod: " << hnsRequestedDuration << std::endl;
+        
+        hr = pAudioClient->Initialize(
+            AUDCLNT_SHAREMODE_SHARED,
+            AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+            hnsRequestedDuration,
+            0,
+            &wfx,
+            NULL
+        );
+        if(FAILED(hr))
+        {
+            std::cout << "audio client Initialize failed: " << std::hex << hr << " " << GetLastErrorAsString() << std::endl;
+        }
+        
+        hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+        
+        hr = pAudioClient->SetEventHandle(hEvent);
+        if(FAILED(hr))
+        {
+            std::cout << "SetEventHandle failed" << std::endl;
+        }
+        
+        hr = pAudioClient->GetBufferSize(&bufferFrameCount);
+        if(FAILED(hr))
+        {
+            std::cout << "GetBufferSize failed" << std::endl;
+        }
+        
+        hr = pAudioClient->GetService(
+            IID_IAudioRenderClient,
+            (void**)&pRenderClient
+        );
+        if(FAILED(hr))
+        {
+            std::cout << "GetService failed" << std::endl;
+        }
+        
+        pAudioClient->Start();
+        if(FAILED(hr))
+        {
+            std::cout << "Start failed" << std::endl;
+        }
+        
+        hr = pRenderClient->GetBuffer(bufferFrameCount, &pData);
+        if(FAILED(hr))
+        {
+            std::cout << "GetBuffer failed" << std::endl;
+        }
+        audioModule.Update((void*)pData, 44100, 0);
+        hr = pRenderClient->ReleaseBuffer(bufferFrameCount, flags);
+        if(FAILED(hr))
+        {
+            std::cout << "ReleaseBuffer failed" << std::endl;
+        }
       
         return true;
     }
@@ -137,6 +307,7 @@ public:
     {
         while(msg.message != WM_QUIT)
         {
+            timer.Start();
             while(PeekMessage(&msg, 0, 0, 0, PM_REMOVE))
             {
                 TranslateMessage(&msg);
@@ -146,15 +317,6 @@ public:
             }
             
             gameModule.Update();
-            
-            if(header.dwFlags & WHDR_DONE)
-            {
-                audioModule.Update((void*)buffer, 44100, 0);
-                
-                header = { (char*)buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
-                waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
-                waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
-            }
             
             renderModule.Update(&screen);
 
@@ -172,6 +334,14 @@ public:
                 &bitsInfo,
                 DIB_RGB_COLORS
             );
+            
+            dt = timer.End() / 1000000.0f;
+            /*
+            audioModule.Update((void*)buffer, 44100, 44100 * dt);
+            header = { (char*)buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
+            waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
+            waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
+            */
         }
     }
 
@@ -312,6 +482,9 @@ private:
     RenderModule renderModule;
     AudioModule audioModule;
     GameModule gameModule;
+    
+    Timer timer;
+    float dt;
 };
 
 #endif
