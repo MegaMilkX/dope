@@ -10,9 +10,7 @@
 #include <windows.h>
 #include <stdint.h>
 
-#include <mmdeviceapi.h>
-#include <Audioclient.h>
-typedef LONGLONG REFERENCE_TIME;
+#include <dsound.h>
 
 std::string GetLastErrorAsString()
 {
@@ -150,6 +148,9 @@ struct GameModule
   }
 };
 
+#define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter)
+typedef DIRECT_SOUND_CREATE(direct_sound_create);
+
 class Core : public CoreInterface
 {
 public:
@@ -160,6 +161,7 @@ public:
     {
         InitWindow();
         InitScreen();
+        InitDirectSound();
       
         renderModule.Load();
         renderModule.Init();
@@ -168,7 +170,7 @@ public:
         gameModule.Load();
         gameModule.Init(this);
         
-        WAVEFORMATEX wfx = { WAVE_FORMAT_PCM, 2, 44100, 44100, 4, 16, 0 };
+        
         
         /*
         waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
@@ -181,114 +183,8 @@ public:
         waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
         waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
         */
-        HRESULT hr;
-        REFERENCE_TIME hnsRequestedDuration = 0;
-        IMMDeviceEnumerator *pEnumerator = NULL;
-        IMMDevice *pDevice = NULL;
-        IAudioClient *pAudioClient = NULL;
-        IAudioRenderClient *pRenderClient = NULL;
-        HANDLE hEvent = NULL;
-        HANDLE hTask = NULL;
-        UINT32 bufferFrameCount;
-        BYTE *pData;
-        DWORD flags = 0;
-        const CLSID CLSID_MMDeviceEnumerator = __uuidof(MMDeviceEnumerator);
-        const IID IID_IMMDeviceEnumerator = __uuidof(IMMDeviceEnumerator);
-        const IID IID_IAudioClient = __uuidof(IAudioClient);
-        const IID IID_IAudioRenderClient = __uuidof(IAudioRenderClient);
-        hr = CoCreateInstance(
-            CLSID_MMDeviceEnumerator,
-            0,
-            CLSCTX_ALL,
-            IID_IMMDeviceEnumerator,
-            (void**)&pEnumerator
-        );
-        if(FAILED(hr))
-        {
-            std::cout << "CoCreateInstance failed" << std::endl;
-        }
         
-        hr = pEnumerator->GetDefaultAudioEndpoint(
-            eRender,
-            eConsole,
-            &pDevice
-        );
-        if(FAILED(hr))
-        {
-            std::cout << "GetDefaultAudioEndpoint failed" << std::endl;
-        }
-        
-        hr = pDevice->Activate(
-            IID_IAudioClient,
-            CLSCTX_ALL,
-            NULL,
-            (void**)&pAudioClient
-        );
-        if(FAILED(hr))
-        {
-            std::cout << "Activate failed" << std::endl;
-        }
-        
-        hr = pAudioClient->GetDevicePeriod(NULL, &hnsRequestedDuration);
-        if(FAILED(hr))
-        {
-            std::cout << "GetDevicePeriod failed" << std::endl;
-        }
-        std::cout << "GetDevicePeriod: " << hnsRequestedDuration << std::endl;
-        
-        hr = pAudioClient->Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-            hnsRequestedDuration,
-            0,
-            &wfx,
-            NULL
-        );
-        if(FAILED(hr))
-        {
-            std::cout << "audio client Initialize failed: " << std::hex << hr << " " << GetLastErrorAsString() << std::endl;
-        }
-        
-        hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-        
-        hr = pAudioClient->SetEventHandle(hEvent);
-        if(FAILED(hr))
-        {
-            std::cout << "SetEventHandle failed" << std::endl;
-        }
-        
-        hr = pAudioClient->GetBufferSize(&bufferFrameCount);
-        if(FAILED(hr))
-        {
-            std::cout << "GetBufferSize failed" << std::endl;
-        }
-        
-        hr = pAudioClient->GetService(
-            IID_IAudioRenderClient,
-            (void**)&pRenderClient
-        );
-        if(FAILED(hr))
-        {
-            std::cout << "GetService failed" << std::endl;
-        }
-        
-        pAudioClient->Start();
-        if(FAILED(hr))
-        {
-            std::cout << "Start failed" << std::endl;
-        }
-        
-        hr = pRenderClient->GetBuffer(bufferFrameCount, &pData);
-        if(FAILED(hr))
-        {
-            std::cout << "GetBuffer failed" << std::endl;
-        }
-        audioModule.Update((void*)pData, 44100, 0);
-        hr = pRenderClient->ReleaseBuffer(bufferFrameCount, flags);
-        if(FAILED(hr))
-        {
-            std::cout << "ReleaseBuffer failed" << std::endl;
-        }
+        SecondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
       
         return true;
     }
@@ -336,8 +232,36 @@ public:
             );
             
             dt = timer.End() / 1000000.0f;
-            /*
+            
+            
+            
+            HRESULT hr;
+            void* audio1;
+            DWORD szAudio1;
+            void* audio2;
+            DWORD szAudio2;
+            hr = SecondaryBuffer->Lock(
+                0, 44100 * 2,
+                &audio1, &szAudio1,
+                &audio2, &szAudio2,
+                DSBLOCK_FROMWRITECURSOR 
+            );
+            if(FAILED(hr))
+            {
+                std::cout << "Buffer lock failed: " << std::hex << hr << std::endl;
+            }
+            
             audioModule.Update((void*)buffer, 44100, 44100 * dt);
+            
+            memcpy(audio1, buffer, szAudio1);
+            memcpy(audio2, buffer + szAudio1, szAudio2);
+            
+            SecondaryBuffer->Unlock(
+                audio1, szAudio1,
+                audio2, szAudio2
+            );
+            
+            /*
             header = { (char*)buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
             waveOutPrepareHeader(hWaveOut, &header, sizeof(WAVEHDR));
             waveOutWrite(hWaveOut, &header, sizeof(WAVEHDR));
@@ -459,6 +383,65 @@ private:
       
       return 0;
     }
+    
+    int InitDirectSound()
+    {
+        WAVEFORMATEX wfx = { WAVE_FORMAT_PCM, 2, 44100, 44100 * 4, 4, 16, 0 };
+        
+        HRESULT hr;
+        HMODULE DSoundLib = LoadLibraryA("dsound.dll");
+        if(DSoundLib)
+        {
+            direct_sound_create* DirectSoundCreate = 
+                (direct_sound_create*)GetProcAddress(DSoundLib, "DirectSoundCreate");
+            
+            LPDIRECTSOUND DirectSound;
+            if(DirectSoundCreate && 
+                SUCCEEDED(DirectSoundCreate(0, &DirectSound, 0)))
+            {
+                hr = DirectSound->SetCooperativeLevel(hWnd, DSSCL_PRIORITY);
+                if(FAILED(hr))
+                {
+                    std::cout << "SetCooperativeLevel failed: " << std::hex << hr << std::endl;
+                    return 1;
+                }
+                
+                DSBUFFERDESC BuffDesc = { 0 };
+                BuffDesc.dwSize = sizeof(BuffDesc);
+                BuffDesc.dwFlags = DSBCAPS_PRIMARYBUFFER;
+                
+                hr = DirectSound->CreateSoundBuffer(&BuffDesc, &PrimaryBuffer, 0);
+                if(FAILED(hr))
+                {
+                    std::cout << "CreateSoundBuffer failed (primary): " << std::hex << hr << std::endl;
+                    return 1;
+                }
+                hr = PrimaryBuffer->SetFormat(&wfx);
+                if(FAILED(hr))
+                {
+                    std::cout << "SetFormat failed (primary): " << std::hex << hr << std::endl;
+                    return 1;
+                }
+                
+                BuffDesc.dwFlags = 0;
+                BuffDesc.dwBufferBytes = 44100 * 4;
+                BuffDesc.lpwfxFormat = &wfx;
+                hr = DirectSound->CreateSoundBuffer(&BuffDesc, &SecondaryBuffer, 0);
+                if(FAILED(hr))
+                {
+                    std::cout << "CreateSoundBuffer failed (secondary): " << std::hex << hr << std::endl;
+                    return 1;
+                }
+            }
+            else
+            {
+                std::cout << "DirectSoundCreate failed" << std::endl;
+                return 1;
+            }
+        }
+        
+        return 0;
+    }
 
     HWND hWnd = 0;
     HDC hdc;
@@ -477,7 +460,9 @@ private:
     LPSTR lpData;
     float clpData[65536];
 
-    short buffer[44100];
+    short buffer[176400];
+    LPDIRECTSOUNDBUFFER PrimaryBuffer;
+    LPDIRECTSOUNDBUFFER SecondaryBuffer;
     
     RenderModule renderModule;
     AudioModule audioModule;
