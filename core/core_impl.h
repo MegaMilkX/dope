@@ -201,6 +201,7 @@ public:
     
     void Run()
     {
+        DWORD prevWritePos = 0;
         while(msg.message != WM_QUIT)
         {
             timer.Start();
@@ -230,29 +231,50 @@ public:
                 &bitsInfo,
                 DIB_RGB_COLORS
             );
-            
-            dt = timer.End() / 1000000.0f;
-            
-            
+         
+            //Sleep(30);
             
             HRESULT hr;
+            
+            
+            DWORD writePos = 0;
+            hr = SecondaryBuffer->GetCurrentPosition(NULL, &writePos);
+            if(FAILED(hr))
+            {
+                std::cout << "GetCurrentPosition failed" << std::endl;
+            }
+            
             void* audio1;
             DWORD szAudio1;
             void* audio2;
             DWORD szAudio2;
             hr = SecondaryBuffer->Lock(
-                0, 44100 * 2,
+                writePos, 16384,
                 &audio1, &szAudio1,
                 &audio2, &szAudio2,
-                DSBLOCK_FROMWRITECURSOR 
+                0 
             );
             if(FAILED(hr))
             {
                 std::cout << "Buffer lock failed: " << std::hex << hr << std::endl;
             }
             
-            audioModule.Update((void*)buffer, 44100, 44100 * dt);
+            dt = timer.End() / 1000000.0f;
             
+            DWORD dPos;
+            if(writePos >= prevWritePos)
+                dPos = writePos - prevWritePos;
+            else
+            {
+                dPos = (44100 * 4 - prevWritePos) + writePos;
+            }
+            
+            ZeroMemory(buffer, sizeof(buffer));
+            audioModule.Update((void*)buffer, 44100, dPos / 2);
+            prevWritePos = writePos;
+            
+            ZeroMemory(audio1, szAudio1);
+            ZeroMemory(audio2, szAudio2);
             memcpy(audio1, buffer, szAudio1);
             memcpy(audio2, buffer + szAudio1, szAudio2);
             
@@ -260,6 +282,8 @@ public:
                 audio1, szAudio1,
                 audio2, szAudio2
             );
+            
+            
             
             /*
             header = { (char*)buffer, sizeof(buffer), 0, 0, 0, 0, 0, 0 };
@@ -460,7 +484,7 @@ private:
     LPSTR lpData;
     float clpData[65536];
 
-    short buffer[176400];
+    short buffer[88200];
     LPDIRECTSOUNDBUFFER PrimaryBuffer;
     LPDIRECTSOUNDBUFFER SecondaryBuffer;
     
